@@ -47,8 +47,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * [RFC 9207](https://datatracker.ietf.org/doc/html/rfc9207) `iss` authorization-response parameter and the
   `authorization_response_iss_parameter_supported` metadata field (mix-up defense), gated by
   `OAUTH_BCP_INSECURE_OMIT_AUTHZ_ISS_ENABLED`.
-* A `--deploy` security system check that flags every RFC 9700 setting currently on its non-compliant value
-  (ids `oauth2_provider.W001`–`W008`), plus an error (`oauth2_provider.E001`) for the incompatible combination of
+* Config-validation gates for the RFC 9700 recommendations expressed through existing settings (the settings stay
+  canonical; the gate only sets validation severity — insecure value → check Warning while the gate is `True`,
+  check Error once it is `False`): `OAUTH_BCP_INSECURE_REFRESH_TOKEN_REPLAY_ENABLED`
+  (`REFRESH_TOKEN_REUSE_PROTECTION`, §4.14.2), `OAUTH_BCP_INSECURE_HTTP_REDIRECT_URI_ENABLED`
+  (`ALLOWED_REDIRECT_URI_SCHEMES`, §2.1), `OAUTH_BCP_INSECURE_WILDCARD_REDIRECT_URI_ENABLED`
+  (`ALLOW_URI_WILDCARDS`, §4.1.1), and `OAUTH_BCP_INSECURE_PKCE_OPTIONAL_ENABLED` (`PKCE_REQUIRED`, §2.1.1).
+* A `--deploy` security system check that flags every RFC 9700 recommendation currently on a non-compliant value
+  (warnings `oauth2_provider.W001`–`W010`, errors `oauth2_provider.E002`–`E005` when the corresponding
+  config-validation gate is disabled), plus an error (`oauth2_provider.E001`) for the incompatible combination of
   hashed token storage and a non-zero `REFRESH_TOKEN_GRACE_PERIOD_SECONDS`.
 * New `docs/security.rst` page mapping each RFC 9700 recommendation to the corresponding setting.
 

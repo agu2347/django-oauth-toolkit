@@ -560,3 +560,56 @@ class TestDeployChecks(TestCase):
         self.oauth2_settings.REFRESH_TOKEN_GRACE_PERIOD_SECONDS = 60
         errors = [m for m in self._run() if isinstance(m, checks.Error)]
         self.assertEqual([m.id for m in errors], ["oauth2_provider.E001"])
+
+
+@pytest.mark.usefixtures("oauth2_settings")
+class TestConfigValidationGates(TestCase):
+    """The config-validation gates set severity for the canonical settings: an
+    insecure value warns while the gate is True and errors once it is False."""
+
+    def _run(self):
+        from oauth2_provider.checks import validate_bcp_configuration
+
+        return validate_bcp_configuration(None)
+
+    def _ids(self, kind):
+        return {m.id for m in self._run() if isinstance(m, kind)}
+
+    def test_refresh_replay_warns_then_errors(self):
+        # Default: REFRESH_TOKEN_REUSE_PROTECTION=False, gate True -> W007.
+        self.assertIn("oauth2_provider.W007", self._ids(checks.Warning))
+        self.oauth2_settings.OAUTH_BCP_INSECURE_REFRESH_TOKEN_REPLAY_ENABLED = False
+        self.assertIn("oauth2_provider.E002", self._ids(checks.Error))
+        # A compliant value is silent in either gate position.
+        self.oauth2_settings.REFRESH_TOKEN_REUSE_PROTECTION = True
+        self.assertNotIn("oauth2_provider.E002", self._ids(checks.Error))
+        self.assertNotIn("oauth2_provider.W007", self._ids(checks.Warning))
+
+    def test_http_redirect_warns_then_errors(self):
+        self.assertIn("oauth2_provider.W008", self._ids(checks.Warning))
+        self.oauth2_settings.OAUTH_BCP_INSECURE_HTTP_REDIRECT_URI_ENABLED = False
+        self.assertIn("oauth2_provider.E003", self._ids(checks.Error))
+        self.oauth2_settings.ALLOWED_REDIRECT_URI_SCHEMES = ["https"]
+        self.assertNotIn("oauth2_provider.E003", self._ids(checks.Error))
+
+    def test_wildcard_redirect_warns_then_errors(self):
+        # Default ALLOW_URI_WILDCARDS=False is compliant -> silent.
+        self.assertNotIn("oauth2_provider.W009", self._ids(checks.Warning))
+        self.oauth2_settings.ALLOW_URI_WILDCARDS = True
+        self.assertIn("oauth2_provider.W009", self._ids(checks.Warning))
+        self.oauth2_settings.OAUTH_BCP_INSECURE_WILDCARD_REDIRECT_URI_ENABLED = False
+        self.assertIn("oauth2_provider.E004", self._ids(checks.Error))
+
+    def test_pkce_optional_warns_then_errors(self):
+        # Default PKCE_REQUIRED=True is compliant -> silent.
+        self.assertNotIn("oauth2_provider.W010", self._ids(checks.Warning))
+        self.oauth2_settings.PKCE_REQUIRED = False
+        self.assertIn("oauth2_provider.W010", self._ids(checks.Warning))
+        self.oauth2_settings.OAUTH_BCP_INSECURE_PKCE_OPTIONAL_ENABLED = False
+        self.assertIn("oauth2_provider.E005", self._ids(checks.Error))
+
+    def test_callable_pkce_required_is_not_flagged(self):
+        self.oauth2_settings.PKCE_REQUIRED = lambda client_id: False
+        self.oauth2_settings.OAUTH_BCP_INSECURE_PKCE_OPTIONAL_ENABLED = False
+        self.assertNotIn("oauth2_provider.W010", self._ids(checks.Warning))
+        self.assertNotIn("oauth2_provider.E005", self._ids(checks.Error))

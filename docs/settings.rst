@@ -419,6 +419,27 @@ compliant settings block.
     ``REFRESH_TOKEN_GRACE_PERIOD_SECONDS`` (``manage.py check`` raises
     ``oauth2_provider.E001``).
 
+The remaining gates are *config-validation* gates: they do not change runtime behavior
+or replace the settings they cover — the canonical setting stays in control. They set
+the severity of the ``manage.py check --deploy`` message when the covered setting is on
+a non-compliant value: ``True`` (default) → Warning, ``False`` → Error.
+
+``OAUTH_BCP_INSECURE_REFRESH_TOKEN_REPLAY_ENABLED``
+    Default: ``True``. Flags ``REFRESH_TOKEN_REUSE_PROTECTION = False``
+    (RFC 9700 §4.14.2) as ``W007`` / ``E002``.
+
+``OAUTH_BCP_INSECURE_HTTP_REDIRECT_URI_ENABLED``
+    Default: ``True``. Flags ``"http"`` in ``ALLOWED_REDIRECT_URI_SCHEMES``
+    (RFC 9700 §2.1) as ``W008`` / ``E003``.
+
+``OAUTH_BCP_INSECURE_WILDCARD_REDIRECT_URI_ENABLED``
+    Default: ``True``. Flags ``ALLOW_URI_WILDCARDS = True`` (RFC 9700 §4.1.1) as
+    ``W009`` / ``E004``.
+
+``OAUTH_BCP_INSECURE_PKCE_OPTIONAL_ENABLED``
+    Default: ``True``. Flags ``PKCE_REQUIRED = False`` (RFC 9700 §2.1.1) as ``W010`` /
+    ``E005``. A callable ``PKCE_REQUIRED`` (per-client policy) is not flagged.
+
 OIDC_ENABLED
 ~~~~~~~~~~~~
 Default: ``False``

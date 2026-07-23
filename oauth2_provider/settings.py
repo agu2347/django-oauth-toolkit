@@ -146,6 +146,17 @@ DEFAULTS = {
     "OAUTH_BCP_INSECURE_ACCESS_TOKEN_IN_QUERY_ENABLED": True,
     "OAUTH_BCP_INSECURE_OMIT_AUTHZ_ISS_ENABLED": True,
     "OAUTH_BCP_INSECURE_PLAINTEXT_TOKEN_STORAGE_ENABLED": True,
+    # Config-validation gates. Unlike the behavior gates above, these do not change
+    # runtime behavior and do not replace the settings they cover — the canonical
+    # settings (REFRESH_TOKEN_REUSE_PROTECTION, ALLOWED_REDIRECT_URI_SCHEMES,
+    # ALLOW_URI_WILDCARDS, PKCE_REQUIRED) remain in control. Each gate sets the
+    # severity of the ``manage.py check --deploy`` message emitted when the covered
+    # setting is on an RFC 9700 non-compliant value: ``True`` (default) -> Warning,
+    # ``False`` -> Error, so an insecure configuration cannot pass deploy checks.
+    "OAUTH_BCP_INSECURE_REFRESH_TOKEN_REPLAY_ENABLED": True,
+    "OAUTH_BCP_INSECURE_HTTP_REDIRECT_URI_ENABLED": True,
+    "OAUTH_BCP_INSECURE_WILDCARD_REDIRECT_URI_ENABLED": True,
+    "OAUTH_BCP_INSECURE_PKCE_OPTIONAL_ENABLED": True,
     # Whether to re-create OAuthlibCore on every request.
     # Should only be required in testing.
     "ALWAYS_RELOAD_OAUTHLIB_CORE": False,

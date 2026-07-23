@@ -14,25 +14,44 @@ controls it.
 Gated behaviors and the 3.4 → 4.0 transition
 --------------------------------------------
 
-Several behaviors that RFC 9700 discourages are still enabled by default so that
-upgrading does not change how an existing deployment behaves. Each is controlled by
-an ``OAUTH_BCP_INSECURE_<behavior>_ENABLED`` boolean:
+Every RFC 9700 recommendation is covered by an ``OAUTH_BCP_INSECURE_<behavior>_ENABLED``
+boolean gate. There are two kinds:
+
+**Behavior gates** control whether DOT itself performs a discouraged behavior:
 
 * ``True`` (the current default) — the insecure/legacy behavior is allowed. The
   request-time gates (implicit grant, password grant, ``plain`` PKCE, access token in
   the query string) emit a ``DeprecationWarning`` each time the behavior is exercised.
-  The two ambient/config gates (``OAUTH_BCP_INSECURE_OMIT_AUTHZ_ISS_ENABLED`` and
+  The two ambient gates (``OAUTH_BCP_INSECURE_OMIT_AUTHZ_ISS_ENABLED`` and
   ``OAUTH_BCP_INSECURE_PLAINTEXT_TOKEN_STORAGE_ENABLED``) would fire on every request,
   so they are surfaced by ``manage.py check --deploy`` (``W005``/``W006``) instead of a
   per-request/per-token warning.
 * ``False`` — the behavior is enforced: the insecure request is rejected, or the
   secure behavior is performed instead.
 
+**Config-validation gates** cover recommendations that are expressed through existing
+settings (``REFRESH_TOKEN_REUSE_PROTECTION``, ``ALLOWED_REDIRECT_URI_SCHEMES``,
+``ALLOW_URI_WILDCARDS``, ``PKCE_REQUIRED``). The gate does not replace the setting —
+the setting stays canonical and in control of runtime behavior. Instead the gate sets
+the severity of the ``manage.py check --deploy`` message when the setting is on a
+non-compliant value:
+
+* ``True`` (the current default) — an insecure value produces a check **Warning**.
+* ``False`` — an insecure value produces a check **Error**, so a non-compliant
+  configuration cannot pass deploy checks. (A compliant value produces nothing in
+  either position.)
+
+The config-validation gates are ``OAUTH_BCP_INSECURE_REFRESH_TOKEN_REPLAY_ENABLED``
+(§4.14.2), ``OAUTH_BCP_INSECURE_HTTP_REDIRECT_URI_ENABLED`` (§2.1),
+``OAUTH_BCP_INSECURE_WILDCARD_REDIRECT_URI_ENABLED`` (§4.1.1), and
+``OAUTH_BCP_INSECURE_PKCE_OPTIONAL_ENABLED`` (§2.1.1).
+
 **These defaults are scheduled to flip to** ``False`` **in the 4.0 release.** Set them
 to ``False`` now to adopt the compliant behavior early and silence the warnings.
 
-Run ``python manage.py check --deploy`` to get a checklist of every gate (and the two
-existing settings below) that is currently on its non-compliant value.
+Run ``python manage.py check --deploy`` to get a checklist of every recommendation that
+is currently on a non-compliant value (warnings while the gates are enabled, errors
+once they are disabled).
 
 Compliant settings block
 -------------------------
@@ -53,9 +72,17 @@ below); enable it once you have confirmed ``REFRESH_TOKEN_GRACE_PERIOD_SECONDS``
         "OAUTH_BCP_INSECURE_ACCESS_TOKEN_IN_QUERY_ENABLED": False,
         "OAUTH_BCP_INSECURE_OMIT_AUTHZ_ISS_ENABLED": False,
 
-        # Existing settings whose defaults also change in 4.0
+        # Canonical settings whose defaults also change in 4.0
         "REFRESH_TOKEN_REUSE_PROTECTION": True,
         "ALLOWED_REDIRECT_URI_SCHEMES": ["https"],
+
+        # Config-validation gates: turn any remaining insecure value of the
+        # settings above (plus ALLOW_URI_WILDCARDS / PKCE_REQUIRED) into a
+        # `check --deploy` error instead of a warning
+        "OAUTH_BCP_INSECURE_REFRESH_TOKEN_REPLAY_ENABLED": False,
+        "OAUTH_BCP_INSECURE_HTTP_REDIRECT_URI_ENABLED": False,
+        "OAUTH_BCP_INSECURE_WILDCARD_REDIRECT_URI_ENABLED": False,
+        "OAUTH_BCP_INSECURE_PKCE_OPTIONAL_ENABLED": False,
 
         # Optional, opt-in hardening (see the caveat below)
         # "OAUTH_BCP_INSECURE_PLAINTEXT_TOKEN_STORAGE_ENABLED": False,
@@ -69,14 +96,21 @@ PKCE (§2.1.1)
 PKCE is required by default (``PKCE_REQUIRED`` is ``True``). RFC 9700 also
 discourages the ``plain`` ``code_challenge_method`` in favor of ``S256``; set
 ``OAUTH_BCP_INSECURE_PKCE_PLAIN_ENABLED = False`` to reject ``plain`` challenges and
-drop it from the authorization-server metadata.
+drop it from the authorization-server metadata. A deployment that sets
+``PKCE_REQUIRED = False`` is flagged by the
+``OAUTH_BCP_INSECURE_PKCE_OPTIONAL_ENABLED`` validation gate (``W010`` while the gate
+is enabled, ``E005`` once it is disabled; a callable ``PKCE_REQUIRED`` is a per-client
+policy and is not flagged).
 
 Redirect URI matching (§2.1)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 DOT already performs exact redirect-URI matching (scheme, host, port, and path), with
 wildcards off (``ALLOW_URI_WILDCARDS`` defaults to ``False``). Set
 ``ALLOWED_REDIRECT_URI_SCHEMES = ["https"]`` to disallow registering plaintext ``http``
-redirect URIs.
+redirect URIs. Two validation gates cover these settings:
+``OAUTH_BCP_INSECURE_HTTP_REDIRECT_URI_ENABLED`` flags ``http`` in the scheme list
+(``W008``/``E003``) and ``OAUTH_BCP_INSECURE_WILDCARD_REDIRECT_URI_ENABLED`` flags
+``ALLOW_URI_WILDCARDS = True`` (``W009``/``E004``).
 
 .. note::
    Requiring ``https`` also disallows native-app loopback callbacks
@@ -128,7 +162,10 @@ Refresh-token rotation and replay detection (§4.14)
 Rotation is on by default (``ROTATE_REFRESH_TOKEN``). Set
 ``REFRESH_TOKEN_REUSE_PROTECTION`` to ``True`` to revoke the entire token family when
 a refresh token is replayed (§4.14.2). Note that reuse detection only treats a replay
-as an attack after ``REFRESH_TOKEN_GRACE_PERIOD_SECONDS``.
+as an attack after ``REFRESH_TOKEN_GRACE_PERIOD_SECONDS``. The
+``OAUTH_BCP_INSECURE_REFRESH_TOKEN_REPLAY_ENABLED`` validation gate flags
+``REFRESH_TOKEN_REUSE_PROTECTION = False`` (``W007`` while the gate is enabled,
+``E002`` once it is disabled).
 
 Token storage at rest (§4)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~

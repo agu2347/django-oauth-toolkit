@@ -42,13 +42,71 @@ _BCP_GATES = [
 ]
 
 
+def _pkce_not_required(settings):
+    # A callable PKCE_REQUIRED is a per-client policy that cannot be evaluated
+    # statically, so only a plain falsy value is flagged.
+    return not callable(settings.PKCE_REQUIRED) and not settings.PKCE_REQUIRED
+
+
+# Config-validation gates. These gates do not replace the settings they cover — the
+# canonical settings stay the source of truth (and the registry of what to validate).
+# Each tuple is (gate setting, predicate returning True when the covered setting is on
+# an RFC 9700 non-compliant value, description, warning id, error id, fix hint).
+# While the gate is True an insecure value produces a Warning; when the gate is False
+# it produces an Error, so a non-compliant configuration cannot pass deploy checks.
+_BCP_CONFIG_GATES = [
+    (
+        "OAUTH_BCP_INSECURE_REFRESH_TOKEN_REPLAY_ENABLED",
+        lambda settings: not settings.REFRESH_TOKEN_REUSE_PROTECTION,
+        "refresh token replay detection is disabled (§4.14.2)",
+        "oauth2_provider.W007",
+        "oauth2_provider.E002",
+        (
+            "Set OAUTH2_PROVIDER['REFRESH_TOKEN_REUSE_PROTECTION'] = True to revoke the "
+            "whole token family when a refresh token is replayed."
+        ),
+    ),
+    (
+        "OAUTH_BCP_INSECURE_HTTP_REDIRECT_URI_ENABLED",
+        lambda settings: "http" in settings.ALLOWED_REDIRECT_URI_SCHEMES,
+        "plaintext `http` redirect URIs are allowed (§2.1)",
+        "oauth2_provider.W008",
+        "oauth2_provider.E003",
+        (
+            "Remove 'http' from OAUTH2_PROVIDER['ALLOWED_REDIRECT_URI_SCHEMES'] to require "
+            "https redirect URIs. Note this also disallows native-app loopback "
+            "(http://127.0.0.1) callbacks per RFC 8252, so keep 'http' if you must support them."
+        ),
+    ),
+    (
+        "OAUTH_BCP_INSECURE_WILDCARD_REDIRECT_URI_ENABLED",
+        lambda settings: settings.ALLOW_URI_WILDCARDS,
+        "wildcard redirect URIs are allowed instead of exact matching (§4.1.1)",
+        "oauth2_provider.W009",
+        "oauth2_provider.E004",
+        "Set OAUTH2_PROVIDER['ALLOW_URI_WILDCARDS'] = False to require exact redirect URIs.",
+    ),
+    (
+        "OAUTH_BCP_INSECURE_PKCE_OPTIONAL_ENABLED",
+        _pkce_not_required,
+        "PKCE is not required (§2.1.1)",
+        "oauth2_provider.W010",
+        "oauth2_provider.E005",
+        "Set OAUTH2_PROVIDER['PKCE_REQUIRED'] = True (or a per-client callable).",
+    ),
+]
+
+
 @checks.register(checks.Tags.security, deploy=True)
 def validate_bcp_configuration(app_configs, **kwargs):
     """
-    Warn about configuration that does not follow RFC 9700 (only under ``--deploy``).
+    Flag configuration that does not follow RFC 9700 (only under ``--deploy``).
 
-    These are warnings, not errors: the insecure defaults are intentional for backward
-    compatibility and are scheduled to flip to the compliant value in the 4.0 release.
+    Behavior gates produce warnings while they still allow the legacy behavior (their
+    runtime enforcement happens when the gate is disabled). Config-validation gates
+    control the severity for the settings they cover: an insecure value is a Warning
+    while the gate is enabled and an Error once it is disabled. All the insecure
+    defaults are scheduled to flip to the compliant value in the 4.0 release.
     """
     messages = []
     for setting_name, behavior, check_id in _BCP_GATES:
@@ -64,31 +122,33 @@ def validate_bcp_configuration(app_configs, **kwargs):
                 )
             )
 
-    if not oauth2_settings.REFRESH_TOKEN_REUSE_PROTECTION:
-        messages.append(
-            checks.Warning(
-                "RFC 9700 (OAuth 2.0 Security BCP): refresh token replay detection is disabled (§4.14.2).",
-                hint=(
-                    "Set OAUTH2_PROVIDER['REFRESH_TOKEN_REUSE_PROTECTION'] = True to revoke "
-                    "the whole token family when a refresh token is replayed."
-                ),
-                id="oauth2_provider.W007",
+    for gate_name, is_insecure, behavior, warning_id, error_id, fix_hint in _BCP_CONFIG_GATES:
+        if not is_insecure(oauth2_settings):
+            continue
+        if getattr(oauth2_settings, gate_name):
+            messages.append(
+                checks.Warning(
+                    f"RFC 9700 (OAuth 2.0 Security BCP): {behavior}.",
+                    hint=(
+                        f"{fix_hint} This is a warning because OAUTH2_PROVIDER['{gate_name}'] "
+                        "is True; the default is scheduled to change to False in 4.0, making "
+                        "this configuration an error."
+                    ),
+                    id=warning_id,
+                )
             )
-        )
-
-    if "http" in oauth2_settings.ALLOWED_REDIRECT_URI_SCHEMES:
-        messages.append(
-            checks.Warning(
-                "RFC 9700 (OAuth 2.0 Security BCP): plaintext `http` redirect URIs are allowed (§2.1).",
-                hint=(
-                    "Remove 'http' from OAUTH2_PROVIDER['ALLOWED_REDIRECT_URI_SCHEMES'] to "
-                    "require https redirect URIs. Note this also disallows native-app "
-                    "loopback (http://127.0.0.1) callbacks per RFC 8252, so keep 'http' if "
-                    "you must support them."
-                ),
-                id="oauth2_provider.W008",
+        else:
+            messages.append(
+                checks.Error(
+                    f"RFC 9700 (OAuth 2.0 Security BCP): {behavior}, and "
+                    f"OAUTH2_PROVIDER['{gate_name}'] is False.",
+                    hint=(
+                        f"{fix_hint} Or set OAUTH2_PROVIDER['{gate_name}'] = True to downgrade "
+                        "this to a warning."
+                    ),
+                    id=error_id,
+                )
             )
-        )
 
     # Redacting tokens at rest is incompatible with the refresh-token grace period,
     # which must return the previously issued (plaintext) token from the database.
